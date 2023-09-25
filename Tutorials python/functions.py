@@ -269,6 +269,126 @@ def LoaddataNav(path, params = None):
 
     return pos_dict
 
+def LoaddataSpk(path, Nav, params = None):
+    """
+    Load spiking data into Spk structure, resampled according to timestamps
+    provided in sampleTimes and other parameters defined in loadparams. See
+    DefineLoadParams.m for a description of those parameters.
+
+    INPUT:
+    - loadparams:  a structure whose fields contain the parameters necessary
+    to load the spiking data data and resample them.
+    See DefineLoadParams.m for a description of these parameters.
+    - Nav: navigation data
+
+    OUTPUT:
+    - Spk: a matlab structure whose fields contain the different types of
+    behavioral data resampled at the desired sampling rate (defined in
+    loadparams.samplingRate).
+
+    Fields of Nav are the following:
+    - sampleTimes: time stamps of the resampled spike trains
+    - spikeTimes: a ntimes x 1 array of all spike times
+    - spikeID: cluster IDs of spikes in spikeTimes
+    - spikeTrain: a nTimes x nCells array of spike counts in bins centered
+    around sample times of Spk.sampleTimes
+    - shankID: 1 x nCells array of ID of the shank where each cluster was recorded
+    - PyrCell: 1 x nCells logical array. true if the cluster is a putative Pyramidal neuron
+    - IntCell: 1 x nCells logical array. true if the cluster is a putative Interneuron
+    - hpcCell: 1 x nCells logical array. true if the cluster is in hpc
+    - blaRCell: 1 x nCells logical array. true if the cluster is in right bla
+    - blaLCell: 1 x nCells logical array. true if the cluster is in left bla
+    - ripple: ntimes x 1 array with ones wherever there is a ripple.
+    - ripplepeak: ntimes x 1 array with ones for ripple peaks.
+    - rippleTimes: timestamps of the detected ripple peaks (in seconds)
+
+    USAGE:
+    Spk = LoaddataSpk(path, Nav)
+
+    written by J.Fournier 08/2023 for the iBio Summer school
+    Adapted by Tulio Almeida"""
+    import os
+    import mat73
+    import scipy.io
+    import numpy as np
+    import pandas as pd
+    from scipy import signal,stats,sparse,interpolate
+
+    if params is None:
+        params =  DefineLoadParams()
+
+    # files paths
+    evt_files = {filename.split('.')[-2]:os.path.join(path, filename) for filename in os.listdir(path) if filename.endswith('.evt')}
+    mat_files = {filename.split('.')[-2]:os.path.join(path, filename) for filename in os.listdir(path) if filename.endswith('.mat')}
+
+    # loading spike times and cluster ID from the prepared .mat file
+    spk = scipy.io.loadmat(mat_files['HippoSpikes'])
+
+    # Removing spikes that are before or after behavior started
+    extraspk = (spk['HippoSpikes'][:,0] < Nav['sampleTimes'][0]) | (spk['HippoSpikes'][:,0] > Nav['sampleTimes'][-1])
+    spk['HippoSpikes'] = np.delete(spk['HippoSpikes'],extraspk,0)
+
+    # Saving spike times and cluster IDs.
+
+    spk_dict = {'spikeTimes':spk['HippoSpikes'][:,0],
+                'spikeID':spk['HippoSpikes'][:,1]}
+    
+    # keep only cells that were either in hpc or bla
+    # Saving some cluster info into the Spk structure
+    spkinfo = scipy.io.loadmat(mat_files['IndexType'])
+    spkinfo = spkinfo['IndexType']
+    hpcblaClustidx = np.isin(spkinfo[:,2], [params['ShankList'], params['ShankList_blaL'], params['ShankList_blaR']])
+
+    # Keeping only cells in hpc or bla
+    goodspkidx = np.isin(spk_dict['spikeID'],np.argwhere(hpcblaClustidx))
+    spk_dict['spikeTimes'] = spk_dict['spikeTimes'][goodspkidx]
+    spk_dict['spikeID'] = spk_dict['spikeID'][goodspkidx]
+
+    # convert spike times into an array of spike trains, sampled according to sampleTimes.
+    clustList = np.unique(spk['HippoSpikes'][:,1]).astype(int)
+    ncells = max(clustList)
+    nTimeSamples = len(Nav['sampleTimes'])
+    sampleRate = 1 / np.mean(np.diff(Nav['sampleTimes']))
+
+    spk_dict['spikeTrain'] = np.zeros((nTimeSamples, ncells))
+    spk_dict['spikeTimes'] = [[] for cell in range(ncells)]
+    binEdges = np.concatenate((Nav['sampleTimes'],max(Nav['sampleTimes']) + 1/params['sampleRate'])) 
+
+    for icell in clustList:
+        s = spk['HippoSpikes'][spk['HippoSpikes'][:,1] == icell][:,0]
+        spk_dict['spikeTrain'][:,icell-1] = np.histogram(s,binEdges)[0]
+
+    spk_dict['sampleTimes'] = Nav['sampleTimes']
+
+    # Saving some cluster info into the Spk structure
+    HippoClustidx = np.isin(spkinfo[:,2],params['ShankList'])
+    spk_dict['shankID'] = spkinfo[HippoClustidx,2]
+    spk_dict['PyrCell'] = (spkinfo[HippoClustidx,5] == 1)*1
+    spk_dict['IntCell'] = (spkinfo[HippoClustidx,5] == 2)*1
+    spk_dict['hpcCell'] = np.isin(spk_dict['shankID'],params['ShankList'])
+    spk_dict['blaLCell'] = np.isin(spk_dict['shankID'],params['ShankList_blaL'])
+    spk_dict['blaRCell'] = np.isin(spk_dict['shankID'],params['ShankList_blaR'])
+
+    # loading ripples timestamps and filling in Spk.ripple with 1 when there
+    # is a ripple and Spk.ripplepeak with 1 for the peak of each ripple
+    spk_dict['ripple'] = np.zeros((len(Nav['sampleTimes']),1))
+    spk_dict['ripplepeak'] = np.zeros((len(Nav['sampleTimes']),1))
+
+    rip = pd.read_table(evt_files['rip'],header = None)
+    ripstart = rip[np.isin(rip[1].values, 'Ripple start 23')][0].values/1000
+    ripstop = rip[np.isin(rip[1].values, 'Ripple stop 23')][0].values/1000
+    rippeak = rip[np.isin(rip[1].values, 'Ripple peak 23')][0].values/1000
+
+    for idx in range(len(ripstart)):
+        rippleidx = (Nav['sampleTimes'] >= ripstart[idx]) & (Nav['sampleTimes'] <= ripstop[idx])
+        spk_dict['ripple'][rippleidx] = 1
+        rippeakidx = np.argmin(abs(Nav['sampleTimes'] - rippeak[idx]))
+        spk_dict['ripplepeak'][rippeakidx] = 1
+
+    spk_dict['rippleTimes'] = rippeak
+
+    return spk_dict
+
 def DefineMapsParams(): # TODO
     """Define a set of parameters needed to compute place fields.
      
@@ -324,6 +444,7 @@ def DefineLoadParams():
             'pix2cm': 0.4300,
             'ShankList': [1,2,3,4],
             'ShankList_blaL': [5,6,7,8],
+            'ShankList_blaR': [13,14,15,16,17,18,19],
             'LfpChannel_Hpc': 2,
             'LfpChannel_Bla': 2,
             'LfpChannel_Acc': 2,
