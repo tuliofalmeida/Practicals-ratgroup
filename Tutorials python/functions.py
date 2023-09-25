@@ -352,7 +352,7 @@ def LoaddataSpk(path, Nav, params = None):
 
     spk_dict['spikeTrain'] = np.zeros((nTimeSamples, ncells))
     spk_dict['spikeTimes'] = [[] for cell in range(ncells)]
-    binEdges = np.concatenate((Nav['sampleTimes'],max(Nav['sampleTimes']) + 1/params['sampleRate'])) 
+    binEdges = np.concatenate((Nav['sampleTimes'],max(Nav['sampleTimes']) + 1/sampleRate)) 
 
     for icell in clustList:
         s = spk['HippoSpikes'][spk['HippoSpikes'][:,1] == icell][:,0]
