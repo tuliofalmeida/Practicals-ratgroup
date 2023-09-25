@@ -215,7 +215,7 @@ def LoaddataNav(path, params = None):
         trialStart = np.concatenate((np.zeros((1,1)),trialStart))
 
     # %if the recording is stopped while the animal is on the track, we modify trialEnd accordingly.
-    if len(trialEnd) < len(trialStart)
+    if len(trialEnd) < len(trialStart):
         trialEnd = np.concatenate((trialEnd , len(pos_dict['Xpos'])))
 
     # Initializing the vector of trialIDs
@@ -227,7 +227,7 @@ def LoaddataNav(path, params = None):
         if pos_dict['sampleTimes'][trialEnd[k]] - pos_dict['sampleTimes'][trialStart[k]] > trialduration_th:
             trialnum = trialnum + 1
             pos_dict['trialID'][trialStart[k]:trialEnd[k]] = trialnum
-            
+
     # loading eeg states timestamps (wake, rem, nrem) and filling in Lfp.eegstate with 1 for wake, 0 for drowsy,
     # -1 for REM sleep and -2 for non-REM sleep.
 
