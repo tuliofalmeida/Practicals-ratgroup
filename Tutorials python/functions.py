@@ -255,7 +255,7 @@ def LoaddataNav(path, params = None):
 
     # Loading accelerometer data
 
-    acc = mat73.loadmat(mat_files['LFP2'], only_include='acc')
+    acc = mat73.loadmat(mat_files['LFP'], only_include='acc')
     acc = acc['acc']
 
     # Sample times for the accelerometer
