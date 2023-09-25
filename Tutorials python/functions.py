@@ -207,16 +207,19 @@ def LoaddataNav(path, params = None):
     # Looking for potential start and end of trials
     trialduration_th = 0.5
                 
-    trialStart = np.argwhere(np.sign(np.diff(~np.isnan(pos_dict['Xpos'][:-1])))>0) + 1
-    trialEnd = np.argwhere(np.sign(np.diff(~np.isnan(pos_dict['Xpos'])))<0)
+    trialStart = np.argwhere(np.sign(np.diff(~np.isnan(pos_dict['Xpos'][:-1])*1).astype(int)) > 0) +1
+    trialEnd = np.argwhere(np.sign(np.diff(~np.isnan(pos_dict['Xpos'])*1).astype(int))<0)
 
     # if the animal is already on the track at the beginning, we modify trialStart accordingly
     if trialEnd[0] < trialStart[0]:
-        trialStart = np.concatenate((np.zeros((1,1)),trialStart))
+        trialStart = np.concatenate((np.zeros((1,1)),trialStart)).astype(int)
 
     # %if the recording is stopped while the animal is on the track, we modify trialEnd accordingly.
     if len(trialEnd) < len(trialStart):
-        trialEnd = np.concatenate((trialEnd , len(pos_dict['Xpos'])))
+        trialEnd = np.concatenate((trialEnd , len(pos_dict['Xpos']))).astype(int)
+
+    trialStart = trialStart.reshape(-1)
+    trialEnd = trialEnd.reshape(-1)
 
     # Initializing the vector of trialIDs
     pos_dict['trialID'] = np.empty(pos_dict['Xpos'].shape) * np.nan
