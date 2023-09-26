@@ -581,7 +581,7 @@ def ComputeMap(Xd = None,Yd = None, Z = None, nXbins = None, nYbins = None):
     Written by J. Fournier in 08/2023 for the Summer school 
     Advanced computational analysis for behavioral and neurophysiological recordings
     Adapted by Tulio Almeida"""
-    
+
     # If Yd is empty, we will compute a 1D map along X
     if Yd is None and nYbins is None:
         map = Compute1DMap(Xd, Z, nXbins)
@@ -743,3 +743,76 @@ def GaussianSmooth2D(input, smthNbins):
     output = output.reshape(sz0)
     
     return output
+
+def GaussianSmooth(arr, smthbins = list):
+    """GaussianSmooth - Smooth a nD array with a Gaussian kernel.
+    
+       output = GaussianSmooth(input, smthNbins)
+       GaussianSmooth applies Gaussian smoothing to an n-dimensional input array
+       using a Gaussian kernel.
+    
+     INPUTS:
+     - input: n-dimensional array to be smoothed.
+     - smthNbins: Standard deviations of the Gaussian kernel for each dimension in
+     a list.
+    
+     OUTPUT:
+     - output: Smoothed n-dimensional array of the same size as the input.
+    
+     USAGE:
+     output = GaussianSmooth(input, smthNbins);
+    
+     SEE ALSO:
+     ComputeMap, MapsAnalyses
+    
+     Written by J. Fournier in 08/2023 for the Summer school
+     Advanced computational analysis for behavioral and neurophysiological recordings
+     Adapted by Tulio Almeida"""
+    import numpy as np
+    if np.isin(0,smthbins):
+        output = GaussianSmooth1D(arr,max(smthbins))
+    else:
+        output = GaussianSmooth2D(arr,smthbins)
+
+    return output
+
+def getSpatialinfo(t, o):
+    """getSpatialinfo computes the spatial information in a tuning curve.
+
+    SInfoperspike = getSpatialinfo(t, o) computes the spatial information in a tuning curve t,
+    considering an occupancy o. The result is returned in bits per spike.
+
+    INPUTS:
+    - t: Tuning curve (often representing firing rates).
+    - o: Occupancy map corresponding to the tuning curve.
+
+    OUTPUT:
+    - SInfoperspike: Spatial information in bits per spike.
+    - SInfo: Spatial information in bits per second.
+
+    USAGE:
+    SInfoperspike = getSpatialinfo(t, o);
+
+    Written by J. Fournier in 08/2023 for the Summer school
+    Advanced computational analysis for behavioral and neurophysiological recordings
+    Adapted by Tulio Almeida"""
+    import numpy as np
+    # Computes the spatial information in tuning curve t, considering an
+    # occupancy o. This is returned in bits per spike.
+    # Excluding values where either t or o are missing
+    valididx = (~np.isnan(t)) & (~np.isnan(o))
+    t = t[valididx]
+    o = o[valididx]
+
+    # Mean rate of the cell
+    meanRate = np.nansum( np.multiply( t, (o/np.nansum(o)) ) )
+
+    # Spatial information in bits per seconds.
+    SInfo = np.multiply( (o/np.nansum(o)),t )
+    SInfo = np.nansum( np.multiply( SInfo, np.log2(t / meanRate ) ) )
+
+    # Converting in bits per spike.
+    SInfoperspike = SInfo/meanRate
+
+    return SInfoperspike
+
