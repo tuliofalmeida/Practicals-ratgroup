@@ -448,19 +448,19 @@ def SetMapsParams(Nav, Spk):
 
     # For instance, for the example data set, we define the following fields
     mapsparams['subset']['Condition'] = [1,3,5]
-    mapsparams['subset']['Condition_op'] = 'ismember'
+    mapsparams['subset']['Condition_op'] = np.isin
 
     mapsparams['subset']['XDir'] = [-1,1]
-    mapsparams['subset']['XDir_op'] = 'ismember'
+    mapsparams['subset']['XDir_op'] = np.isin
 
     mapsparams['subset']['laptype'] = [-1,0,1]
-    mapsparams['subset']['laptype_op'] = 'ismember'
+    mapsparams['subset']['laptype_op'] = np.isin
 
     mapsparams['subset']['Spd'] =  2.5
-    mapsparams['subset']['Spd_op'] = '>='
+    mapsparams['subset']['Spd_op'] = np.greater_equal
 
     # Subset of cells for which place fields will be computed
-    mapsparams['cellidx'] = np.ones((1, Spk['spikeTrain'].shape[1])).astype(bool)
+    mapsparams['cellidx'] = np.ones((1, Spk['spikeTrain'].shape[1])).astype(bool)[0]
 
     # Sampling rate of the data
     mapsparams['sampleRate'] = 1 / np.nanmean(np.diff(Nav['sampleTimes']))
@@ -554,6 +554,46 @@ def Compute2DMap(Xd, Yd, Z, nXbins, nYbins):
     # Converting into a full matrix again for accessing elements more conveniently
 
     return sparse.csr_matrix( ( Z ,( Xd-1, Yd-1 ) ), shape = (nXbins,nYbins) ).toarray()
+
+def ComputeMap(Xd = None,Yd = None, Z = None, nXbins = None, nYbins = None):
+    """ComputeMap - Compute a map efficiently by accumulating Z into values of Xd and Yd.
+
+    map = ComputeMap(Xd, Yd, Z, nXbins, nYbins) efficiently computes a two-dimensional
+    map by accumulating values of the dependent variable Z into the bins of the binned
+    independent variables Xd and Yd. It utilizes sparse matrix operations for faster computation.
+    
+    INPUTS:
+    - Xd: The binned independent variable along the X-axis. If empty, computes a 1D map along Y.
+    - Yd: The binned independent variable along the Y-axis. If empty, computes a 1D map along X.
+    - Z: The dependent variable to be accumulated into Xd and Yd bins.
+    - nXbins: Scalar, number of bins in Xd for accumulating Z values.
+    - nYbins: Scalar, number of bins in Yd for accumulating Z values.
+    
+    OUTPUT:
+    - map: An nYbins x nXbins array of Z values summed into bins of Xd and Yd.
+    
+    USAGE:
+    map = ComputeMap(Xd, Yd, Z, nXbins, nYbins);
+    
+    SEE ALSO:
+    GaussianSmooth, MapsAnalyses
+    
+    Written by J. Fournier in 08/2023 for the Summer school 
+    Advanced computational analysis for behavioral and neurophysiological recordings
+    Adapted by Tulio Almeida"""
+    
+    # If Yd is empty, we will compute a 1D map along X
+    if Yd is None and nYbins is None:
+        map = Compute1DMap(Xd, Z, nXbins)
+    # If Xd is empty, we will compute a 1D map along Y
+    elif Xd is None and nXbins is None:
+        map = Compute1DMap(Yd, Z, nYbins)
+    # Else, compute the 2D map
+    else:
+        map = Compute2DMap(Xd, Yd, Z, nXbins,nYbins)
+
+    return map
+    
 
 def ComputeTriggeredAverage(R, S, idxwin, w = None):
     """Computes a triggered average of vector R based on timestamps in S over a
