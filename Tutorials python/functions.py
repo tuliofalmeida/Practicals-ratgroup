@@ -392,7 +392,7 @@ def LoaddataSpk(path, Nav, params = None):
 
     return spk_dict
 
-def DefineMapsParams(): # TODO
+def DefineMapsParams(Nav, Spk):
     """Define a set of parameters needed to compute place fields.
      
     INPUTS:
@@ -440,6 +440,67 @@ def DefineMapsParams(): # TODO
  
     written by J.Fournier 08/2023 for the iBio Summer school
     Adapted by Tulio Almeida"""
+
+    import numpy as np
+    # Conditions over the fields of Nav for which place fields will be estimated
+    # mapsparams.subset should be a structure where fields have names of the 
+    # fields of Nav to which the condition should apply to.
+    mapsparams = {'subset':{}}
+
+    # For instance, for the example data set, we define the following fields
+    mapsparams['subset']['Condition'] = [1,3,5]
+    mapsparams['subset']['Condition_op'] = 'ismember'
+
+    mapsparams['subset']['XDir'] = [-1,1]
+    mapsparams['subset']['XDir_op'] = 'ismember'
+
+    mapsparams['subset']['laptype'] = [-1,0,1]
+    mapsparams['subset']['laptype_op'] = 'ismember'
+
+    mapsparams['subset']['Spd'] =  2.5
+    mapsparams['subset']['Spd_op'] = '>='
+
+    # Subset of cells for which place fields will be computed
+    mapsparams['cellidx'] = np.ones((1, Spk['spikeTrain'].shape[1])).astype(bool)
+
+    # Sampling rate of the data
+    mapsparams['sampleRate'] = 1 / np.nanmean(np.diff(Nav['sampleTimes']))
+
+    # Scaling factor on the response data (default is 1 / samplingRate so that
+    # spiking data are returned in spike / s)
+    mapsparams['scalingFactor'] = 1 / mapsparams['sampleRate']
+
+    # Name of the independent variable used to map the response along X. Default is Xpos
+    mapsparams['Xvariablename'] = 'Xpos'
+
+    # Edges of position bins used to discretize X
+    mapsparams['Xbinedges'] = np.arange(0,104,4)
+
+    # Size of the gaussian window for smoothing place fields along X (in bins).
+    mapsparams['XsmthNbins'] = 1
+
+    # Name of the independent variable used to map the response along Y. Default is XDir.
+    mapsparams['Yvariablename'] = 'XDir'
+
+    # Size of the gaussian window for smoothing place fields along Y (in bins).
+    mapsparams['YsmthNbins'] = 0
+
+    # Edges of Y bins used to discretize Y
+    mapsparams['Ybinedges'] = [-2,0,2]
+
+    # Occupancy threshold above which positions are included in the place field estimate (in seconds)
+    mapsparams['occ_th'] = 0
+
+    # Minimal number of spikes to consider a cell
+    mapsparams['nspk_th'] = 0
+
+    # Number of shuffle controls to perform for randomization
+    mapsparams['nShuffle'] = 100
+
+    # Number of folds to consider for cross-validation
+    mapsparams['kfold'] = 10
+
+    return mapsparams
 
 def DefineLoadParams():
     params = {'sampleRate': 50,
