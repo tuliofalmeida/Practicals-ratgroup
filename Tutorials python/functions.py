@@ -325,22 +325,21 @@ def LoaddataSpk(path, Nav, params = None):
     mat_files = {filename.split('.')[-2]:os.path.join(path, filename) for filename in os.listdir(path) if filename.endswith('.mat')}
 
     # loading spike times and cluster ID from the prepared .mat file
-    spk = scipy.io.loadmat(mat_files['HippoSpikes'])
+    spk = scipy.io.loadmat(mat_files['AllSpikes'])
 
     # Removing spikes that are before or after behavior started
-    extraspk = (spk['HippoSpikes'][:,0] < Nav['sampleTimes'][0]) | (spk['HippoSpikes'][:,0] > Nav['sampleTimes'][-1])
-    spk['HippoSpikes'] = np.delete(spk['HippoSpikes'],extraspk,0)
+    extraspk = (spk['AllSpikes'][:,0] < Nav['sampleTimes'][0]) | (spk['AllSpikes'][:,0] > Nav['sampleTimes'][-1])
+    spk['AllSpikes'] = np.delete(spk['AllSpikes'],extraspk,0)
 
-    # Saving spike times and cluster IDs.
-
-    spk_dict = {'spikeTimes':spk['HippoSpikes'][:,0],
-                'spikeID':spk['HippoSpikes'][:,1]}
-    
     # keep only cells that were either in hpc or bla
     # Saving some cluster info into the Spk structure
     spkinfo = scipy.io.loadmat(mat_files['IndexType'])
     spkinfo = spkinfo['IndexType']
-    hpcblaClustidx = np.isin(spkinfo[:,2], [params['ShankList'], params['ShankList_blaL'], params['ShankList_blaR']])
+    hpcblaClustidx = np.isin(spkinfo[:,2],params['ShankList']) #  params['ShankList'] + params['ShankList_blaL'] + params['ShankList_blaR']
+
+    # Saving spike times and cluster IDs.
+    spk_dict = {'spikeTimes':spk['AllSpikes'][:,0],
+                'spikeID':spk['AllSpikes'][:,1]}
 
     # Keeping only cells in hpc or bla
     goodspkidx = np.isin(spk_dict['spikeID'],np.argwhere(hpcblaClustidx))
@@ -348,26 +347,26 @@ def LoaddataSpk(path, Nav, params = None):
     spk_dict['spikeID'] = spk_dict['spikeID'][goodspkidx]
 
     # convert spike times into an array of spike trains, sampled according to sampleTimes.
-    clustList = np.unique(spk['HippoSpikes'][:,1]).astype(int)
-    ncells = max(clustList)
+    clustList = np.unique(spk_dict['spikeID']).astype(int)
+    ncells = len(clustList)
     nTimeSamples = len(Nav['sampleTimes'])
     sampleRate = 1 / np.mean(np.diff(Nav['sampleTimes']))
 
     spk_dict['spikeTrain'] = np.zeros((nTimeSamples, ncells))
     spk_dict['spikeTimes'] = [[] for cell in range(ncells)]
-    binEdges = np.concatenate((Nav['sampleTimes'],max(Nav['sampleTimes']) + 1/sampleRate)) 
+    binEdges = np.concatenate((Nav['sampleTimes'],np.array([max(Nav['sampleTimes']) + 1/sampleRate]))) 
 
-    for icell in clustList:
-        s = spk['HippoSpikes'][spk['HippoSpikes'][:,1] == icell][:,0]
-        spk_dict['spikeTrain'][:,icell-1] = np.histogram(s,binEdges)[0]
+    for icell in range(len(clustList)):
+        spk_dict['spikeTimes'][icell].extend(spk['AllSpikes'][spk['AllSpikes'][:,1] == clustList[icell]][:,0])
+        spk_dict['spikeTrain'][:,icell] = np.histogram(spk_dict['spikeTimes'][icell],binEdges)[0]
 
     spk_dict['sampleTimes'] = Nav['sampleTimes']
 
     # Saving some cluster info into the Spk structure
-    HippoClustidx = np.isin(spkinfo[:,2],params['ShankList'])
-    spk_dict['shankID'] = spkinfo[HippoClustidx,2]
-    spk_dict['PyrCell'] = (spkinfo[HippoClustidx,5] == 1)*1
-    spk_dict['IntCell'] = (spkinfo[HippoClustidx,5] == 2)*1
+    # HippoClustidx = np.isin(spkinfo[:,2],params['ShankList'])
+    spk_dict['shankID'] = spkinfo[hpcblaClustidx,2]
+    spk_dict['PyrCell'] = (spkinfo[hpcblaClustidx,5] == 1)*1
+    spk_dict['IntCell'] = (spkinfo[hpcblaClustidx,5] == 2)*1
     spk_dict['hpcCell'] = np.isin(spk_dict['shankID'],params['ShankList'])
     spk_dict['blaLCell'] = np.isin(spk_dict['shankID'],params['ShankList_blaL'])
     spk_dict['blaRCell'] = np.isin(spk_dict['shankID'],params['ShankList_blaR'])
@@ -392,7 +391,7 @@ def LoaddataSpk(path, Nav, params = None):
 
     return spk_dict
 
-def DefineMapsParams(Nav, Spk):
+def SetMapsParams(Nav, Spk):
     """Define a set of parameters needed to compute place fields.
      
     INPUTS:
