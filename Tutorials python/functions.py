@@ -897,3 +897,148 @@ def getDirectionality(t1, t2):
     DirectionalityIndex = np.divide(first,second)
 
     return DirectionalityIndex
+
+def crossvalPartition(n,kfold):
+    """cv = crossvalPartition(n, kfold) returns a structure containing k-fold cross-validation
+    partition sets where training and test sets are contiguous within each partition.
+    
+    INPUTS:
+    - n: Total number of data points.
+    - kfold: Number of folds for cross-validation.
+    
+    OUTPUT:
+    - cv: Struct with fields trainsets and testsets, each containing kfold cell arrays
+      defining the training and testing indices for each fold.
+    
+    USAGE:
+    cv = crossvalPartition(n, kfold);
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio"""
+    import numpy as np
+
+    # Creates a partition of 1:n indices into k-fold.
+
+    trainsets = {k:np.zeros((n)) for k in range(kfold)}
+    testsets = {k:np.zeros((n)) for k in range(kfold)}
+
+    # Edges of the subparts, taken as contiguous.
+
+    kidx = np.multiply(np.floor(np.divide(n,kfold)),np.arange(kfold+1))
+    kidx[-1] = n
+    kidx = kidx.astype(int)
+
+    for k in range(kfold):
+        testsets[k][kidx[k]:kidx[k+1]] = 1
+        trainsets[k][np.invert(testsets[k].astype(bool))] = 1
+
+    cv = {'trainsets':trainsets,
+          'testsets':testsets}
+
+    return cv
+
+def computeEV(y,ypred):
+    """computeEV computes the Explained Variance (EV) of a model's prediction.
+    
+    EV = computeEV(y, ypred) computes the Explained Variance (EV) of a model's prediction
+    given the original data (y) and its prediction (ypred).
+    
+    INPUTS:
+    - y: Original data.
+    - ypred: Model prediction.
+    
+    OUTPUT:
+    - EV: Explained Variance.
+    
+    USAGE:
+    EV = computeEV(y, ypred);
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida"""
+    import numpy as np
+
+    # Calculate Residual Sum of Squares (RSS)
+    RSS = np.nansum(np.power((y - ypred),2))
+
+    # Calculate Mean of the original data (y)
+    m = np.nanmean(y)
+
+    # Calculate Total Sum of Squares (TSS)
+    TSS = np.nansum(np.power((y - m),2))
+
+    # Calculate Explained Variance (EV)
+    return 1 - (RSS/TSS)
+
+def normpdf_python(x, mu, sigma):
+    """Function to calculate the probability density function 
+    for a normal distribution with std = s.
+    
+    ref: https://stackoverflow.com/questions/19913613/matlab-to-python-stat-equation
+    """
+    import numpy as np
+    
+    return 1/(sigma*np.sqrt(2*np.pi))*np.exp(-1*(x-mu)**2/2*sigma**2)
+
+def computeLLH_normal(y, ypred, k = None):
+    """computeLLH_normal Compute log likelihood, Bayesian Information Criterion (BIC),
+    and Akaike Information Criterion (AIC) for a Gaussian model.
+    
+    [LLH, BIC, AIC] = computeLLH_normal(y, ypred, k) computes the log likelihood (LLH)
+    for a Gaussian model given the original signal (y) and its model prediction (ypred).
+    The total number of model parameters (k) is optionally provided for calculating BIC and AIC.
+    
+    INPUTS:
+    - y: Original signal.
+    - ypred: Model prediction.
+    - k: Total number of model parameters (optional for BIC and AIC).
+    
+    OUTPUTS:
+    - LLH: Log likelihood of the Gaussian model.
+    - BIC: Bayesian Information Criterion.
+    - AIC: Akaike Information Criterion.
+    
+    USAGE:
+    [LLH, BIC, AIC] = computeLLH_normal(y, ypred, k);
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida"""
+    import numpy as np
+
+    # std of the model
+
+    s = np.nanstd((y - ypred))
+
+    # probability density function for a normal distribution with std = s.
+
+    pdfun = normpdf_python(y, ypred, s)
+    pdfun[pdfun == 0] = 1e-16
+
+    # Log likelihood is the sum of the log of the probabilities
+
+    LLH = np.nansum(np.log(pdfun))
+
+    # if k is provided, we also compute BIC and AIC of the model.
+
+    if k is None:
+        BIC = np.nan
+        AIC = np.nan
+    else:
+        N = len(y)
+        BIC = k * np.log(N) - 2 * LLH
+        AIC = 2 * k - 2 * LLH
+
+    return LLH,BIC,AIC
+
+def lratiotest(llmax,llmin,dof):
+    """ likelihood ratio test in python
+    
+    Created by Tulio Almeida"""
+    from scipy.stats.distributions import chi2
+
+    LR = 2*(llmax-llmin)
+    p = chi2.sf(LR, dof)
+
+    return LR,p
