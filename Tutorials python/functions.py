@@ -802,7 +802,7 @@ def getSpatialinfo(t, o):
     # Excluding values where either t or o are missing
     valididx = (~np.isnan(t)) & (~np.isnan(o))
     t = t[valididx]
-    o = o[valididx]
+    o = o[valididx[0]]
 
     # Mean rate of the cell
     meanRate = np.nansum( np.multiply( t, (o/np.nansum(o)) ) )
@@ -816,3 +816,84 @@ def getSpatialinfo(t, o):
 
     return SInfoperspike
 
+def getSparsity(t, o):
+    """getSparsity Compute the sparsity index of a tuning curve.
+
+    sparsityIndex = getSparsity(t, o) computes the selectivity of a tuning curve t
+    given an occupancy o. The sparsity index is defined as 1 minus the squared sum
+    of (t.*o)/sum(o) divided by the squared sum of (t.^2.*o)/sum(o), as proposed by
+    Jung, Wiener, and McNaughton (JNS, 1994). A higher value indicates greater sparsity
+    and selectivity in the tuning curve.
+
+    INPUTS:
+    - t: Tuning curve representing firing rates.- o: Occupancy map corresponding to the tuning curve.
+
+    OUTPUT:
+    - sparsityIndex: Sparsity index of the tuning curve.
+
+    USAGE:
+    sparsityIndex = getSparsity(t, o);
+
+    Written by J. Fournier in 08/2023 for the Summer school
+    Advanced computational analysis for behavioral and neurophysiological recordings
+    Adapted by Tulio Almeida"""
+    import numpy as np
+
+    valididx = (~np.isnan(t)) & (~np.isnan(o))
+    t = t[valididx]
+    o = o[valididx[0]]
+
+    return 1 - np.power(np.nansum(np.multiply(t,o/np.nansum(o))),2)/np.nansum(np.multiply(np.power(t,2),o/np.nansum(o)))
+
+def getSelectivity(t):
+    """getSelectivity computes the selectivity index of a tuning curve.
+    
+    selectivityIndex = getSelectivity(t) computes the selectivity index of a
+    tuning curve t as the difference between the maximal and minimal values
+    normalized by the mean value of the tuning curve.
+    
+    INPUT:
+    - t: Tuning curve representing firing rates.
+    
+    OUTPUT:
+    - selectivityIndex: Selectivity index of the tuning curve.
+    
+    USAGE:
+    selectivityIndex = getSelectivity(t);
+    %
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida"""
+    import numpy as np
+
+    return (np.nanmax(t)-np.nanmin(t)) / np.nanmean(t)
+
+def getDirectionality(t1, t2):
+    """getDirectionality Compute the directionality index between two tuning curves.
+    
+    DirectionalityIndex = getDirectionality(t1, t2) computes the directionality
+    index between two tuning curves t1 and t2. The directionality index measures
+    the discrepancy between the tuning curves as the absolute difference
+    divided by the sum
+    
+    INPUTS:
+    - t1: First tuning curve.
+    - t2: Second tuning curve.
+    
+    OUTPUT:
+    - DirectionalityIndex: Directionality index between the two tuning curves.
+    
+    USAGE:
+    DirectionalityIndex = getDirectionality(t1, t2);
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida"""
+    import numpy as np
+
+    first = abs(np.sum(t1-t2))
+    second = np.sum(t1+t2)
+    DirectionalityIndex = np.divide(first,second)
+
+    return DirectionalityIndex
