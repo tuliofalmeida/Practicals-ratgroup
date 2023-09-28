@@ -802,7 +802,10 @@ def getSpatialinfo(t, o):
     # Excluding values where either t or o are missing
     valididx = (~np.isnan(t)) & (~np.isnan(o))
     t = t[valididx]
-    o = o[valididx[0]]
+    try:
+        o = o[valididx]
+    except:
+        o = o[valididx[0]]
 
     # Mean rate of the cell
     meanRate = np.nansum( np.multiply( t, (o/np.nansum(o)) ) )
@@ -841,7 +844,10 @@ def getSparsity(t, o):
 
     valididx = (~np.isnan(t)) & (~np.isnan(o))
     t = t[valididx]
-    o = o[valididx[0]]
+    try:
+        o = o[valididx]
+    except:
+        o = o[valididx[0]]
 
     return 1 - np.power(np.nansum(np.multiply(t,o/np.nansum(o))),2)/np.nansum(np.multiply(np.power(t,2),o/np.nansum(o)))
 
@@ -1039,6 +1045,9 @@ def lratiotest(llmax,llmin,dof):
     from scipy.stats.distributions import chi2
 
     LR = 2*(llmax-llmin)
-    p = chi2.sf(LR, dof)
+    try:
+        p = chi2.sf(LR, max(dof))
+    except:
+        p = chi2.sf(LR, dof)
 
     return LR,p
