@@ -1051,3 +1051,423 @@ def lratiotest(llmax,llmin,dof):
         p = chi2.sf(LR, dof)
 
     return LR,p
+
+def MapsAnalysis(Nav, Spk, mapsparams):    
+    """MapsAnalysis - Estimates two-dimensional place fields and their significance.
+    
+      Maps = MapsAnalysis(Nav, Spk, mapsparams)
+    
+      This function estimates two-dimensional maps and their significance using either
+      shuffling or model comparison on cross-validated predictions.
+    
+      INPUTS:
+      - Nav: A structure containing at least a field called 'sampleTimes' with
+      the sample times of the data and some additional fields with the
+      explanatory variables
+      - Spk: spike data
+      - mapsparams: Struct containing parameters for place field estimation.
+    
+      OUTPUT:
+      - Maps: Struct containing place field analysis results, including fields such as:
+        * map: Two-dimensional place fields (ncells x nYbins x nXbins array)
+        * map_cv: Two-dimensional place fields estimated using k-fold 
+          cross-validation (ncells x nYbins x nXbins x k-fold array)
+        * map_SE: Jackknife estimate of standard error for place fields, 
+          (ncells x nYbins x nXbins array)
+        * mapsparams: Structure of parameters used for analysis
+        * Xbincenters: Bin centers along X-axis
+        * Ybincenters: Bin centers along Y-axis
+        * occmap: Occupancy map, a nYbins x nXbins arrays (scaled by mapsparams.scalingFactor)
+        * SI: Spatial information for each cell (ncells x 1 array).
+        * SparsityIndex: Sparsity index for each cell.
+        * SelectivityIndex: Selectivity index for each cell.
+        * DirectionalityIndex: Directionality index for each cell.
+        * SI_pval: P-values for spatial information, based on shuffle controls
+        * SparsityIndex_pval: P-values for sparsity index, based on shuffle controls
+        * SelectivityIndex_pval: P-values for selectivity index, based on shuffle controls
+        * DirectionalityIndex_pval: P-values for directionality index, based on shuffle controls
+        * EV: Cross-validated percentage of explained variance from place field model
+        * EV_cst: Cross-validated percentage of explained variance from constant mean model
+        * LLH: Cross-validated Log likelihood from place field model
+        * LLH_cst: Cross-validated Log likelihood from constant mean model
+        * LLH_pval: P-values for model comparison from likelihood ratio test
+    
+      USAGE:
+       Nav = LoaddataNav(loadparams)
+       Spk = LoaddataSpk(loadparams, Nav['sampleTimes'])
+       mapsparams = SetMapsParams(Nav,Spk)
+    
+       # Change parameters of mapsparams here if needed. For instance
+       mapsparams.Yvariablename = []; # compute 1D maps along X variable.
+    
+       Maps = MapsAnalysis(Nav, Spk.spikeTrain, mapsparams);
+    
+      SEE ALSO:
+      ComputeMap, GaussianSmooth, computeEV, computeLLH_normal, crossvalPartition,
+      getSpatialinfo, getSparsity, getSelectivity, getDirectionality,
+      lratiotest (requires econometrics toolbox).
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida
+    """
+    smth = 1
+
+    # If no Y variable are indicated in mapsparams, we'll just compute a 1D map
+    if len(mapsparams['Xvariablename']) != 0:
+        X = Nav[mapsparams['Xvariablename']]
+    else:
+        X = np.ones(Nav['sampleTimes'].shape).astype(bool)
+        mapsparams['Xbinedges'] = 1
+        mapsparams['XsmthNbins'] = 0
+
+    # If no Y variable are indicated in mapsparams, we'll just compute a 1D map
+    if len(mapsparams['Yvariablename']) != 0:
+        Y = Nav[mapsparams['Yvariablename']]
+    else:
+        Y = np.ones(Nav['sampleTimes'].shape).astype(bool)
+        mapsparams['Ybinedges'] = 1
+        mapsparams['YsmthNbins'] = 0
+
+    # Selecting time indices over which to compute maps, according to parameters defined in mapsparams.subset
+    tidx = np.ones(X.shape).astype(bool)
+    pnames = list(mapsparams['subset'].keys())
+    fnames = list(Nav.keys()) 
+    for i in range(len(pnames)):
+        if pnames[i] in fnames:
+            fn = mapsparams['subset'][pnames[i] + '_op']
+            tidx = tidx & fn(Nav[pnames[i]], mapsparams['subset'][pnames[i]])
+        elif not pnames[i][-3:] == '_op':
+            print("Some fields of mapsparams.subset are not matching fields of Nav")
+
+    # Selecting time indices where X and Y are in the range of bins
+    try:
+        tidx = (tidx) & \
+            (X >= mapsparams['Xbinedges'][0]) & (X <= mapsparams['Xbinedges'][-1]) & \
+            (Y >= mapsparams['Ybinedges'][0]) & (Y <= mapsparams['Ybinedges'][-1]) & \
+            (~np.isnan(X)) & (~np.isnan(Y))
+    except:
+        tidx = (tidx) & \
+            (X >= mapsparams['Xbinedges'][0]) & (X <= mapsparams['Xbinedges'][-1]) & \
+            (Y >= mapsparams['Ybinedges']) & (Y <= mapsparams['Ybinedges']) & \
+            (~np.isnan(X)) & (~np.isnan(Y))
+
+    # Selecting cell indices for which to compute maps
+    cellidx = np.argwhere((mapsparams['cellidx'].T & np.nansum(Spk['spikeTrain'][tidx,:], 0).astype(bool)) 
+                        > mapsparams['nspk_th'])
+
+    # Subsetting spikeTrain, X and Y.
+    # after this step the cell became the X and the idx the Y
+    # when I tried to fix this the colab RAM ran OOF
+    spikeTrain = Spk['spikeTrain'][tidx,cellidx] 
+    # spikeTrain = Spk['spikeTrain'][tidx,:]
+    # spikeTrain = spikeTrain[:,cellidx]
+    X = X[tidx]
+    Y = Y[tidx]
+
+    # number of bins along X
+    nXbins = max(1,len(mapsparams['Xbinedges']) - 1)
+
+    # number of bins along Y
+    try:
+        nYbins = max(1,len(mapsparams['Ybinedges']) - 1) 
+    except:
+        nYbins = max(1,mapsparams['Ybinedges'])
+
+    # If no Y variable are indicated, we'll just compute a 1D maps so bining parameters are changed accordingly
+    if len(mapsparams['Yvariablename']) == 0:
+        # number of bins along Y
+        nYbins = 1
+
+    # number of selected cells
+    ncells = spikeTrain.shape[0]
+
+    # number of data points
+    ntimepts = spikeTrain.shape[1]
+
+    # Discretizing X position vectors according to mapsparams['Xbinedges']
+    try:
+        X_discrete = np.digitize(X, mapsparams['Xbinedges'])
+        X_discrete = X_discrete.astype(np.float32)
+        X_discrete[np.isnan(X)] = np.nan
+        X_discrete[X_discrete>nXbins] = nXbins
+    except:
+        X_discrete = X
+    # Discretizing Y position vectors according to mapsparams['Ybinedges'] 
+    try:
+        Y_discrete = np.digitize(Y, mapsparams['Ybinedges'])
+        Y_discrete = Y_discrete.astype(np.float32)
+        Y_discrete[np.isnan(Y)] = np.nan
+        Y_discrete[Y_discrete>nYbins] = nYbins
+    except:
+        Y_discrete = Y
+
+    # Computing occupancy map (same for all cells)
+    flat =  mapsparams['scalingFactor'] * np.ones(X_discrete.shape)
+
+    if sum(Y_discrete) == sum(Y):
+        occmap = ComputeMap(Xd = X_discrete, Yd = None, Z = flat,
+                            nXbins = nXbins, nYbins = None)
+    elif sum(X_discrete) == sum(X):
+        occmap = ComputeMap(Xd = None, Yd = Y_discrete, Z = flat,
+                            nXbins = None, nYbins = nYbins)
+    else:
+        occmap = ComputeMap(Xd = X_discrete, Yd = Y_discrete, Z = flat,
+                            nXbins = nXbins, nYbins = nYbins) 
+        
+    # Removing occupancy for bins below the occupancy threshold
+    occmap[occmap <= mapsparams['occ_th']] = np.nan 
+
+    # Smoothing the occupancy map with a 2D gaussian window
+    occmap = GaussianSmooth(occmap, [mapsparams['XsmthNbins'] + smth,mapsparams['YsmthNbins'] + smth]) # +1 ? smth
+
+    # Computing and smoothing spike count map for each cell
+    scmap = np.empty((ncells, nYbins, nXbins)) * np.nan
+    for icell in range(ncells):
+        if sum(Y_discrete) == sum(Y):
+            scmapcell = ComputeMap(Xd = X_discrete, Yd = None, Z = spikeTrain[icell,:],
+                                nXbins = nXbins, nYbins = None)
+        elif sum(X_discrete) == sum(X):
+            scmapcell = ComputeMap(Xd = None, Yd = Y_discrete, Z = spikeTrain[icell,:],
+                                nXbins = None, nYbins = nYbins)
+        else:
+            scmapcell = ComputeMap(Xd = X_discrete, Yd = Y_discrete, Z = spikeTrain[icell,:],
+                                nXbins = nXbins, nYbins = nYbins)  
+            
+        scmapcell[np.isnan(occmap)] = np.nan
+        scmapcell = GaussianSmooth(scmapcell, [mapsparams['YsmthNbins'] + smth, mapsparams['XsmthNbins']+ smth]) # +1 ? smth
+        try:
+            scmap[icell,:,:] = scmapcell
+        except:
+            scmap[icell,:,:] = scmapcell.T
+
+    # Calculating the maps by dividing scmap and occmap
+    try:
+        permutes = np.transpose( np.expand_dims(occmap, axis=occmap.ndim), (2, 0, 1) )
+        mapXY = np.divide(scmap , permutes)
+    except:
+        permutes = np.transpose( np.expand_dims(occmap, axis=occmap.ndim), (2, 1, 0) )
+        mapXY = np.divide(scmap , permutes)
+    occmap = np.squeeze(occmap)
+
+    # Quantifying selectivity by computing the spatial information (SI),
+    # the sparsity index, the selectivity index and the directionality index.
+    SI = np.empty((ncells, 1)) * np.nan
+    SparsityIndex = np.empty((ncells, 1)) * np.nan
+    SelectivityIndex = np.empty((ncells, 1)) * np.nan
+    DirectionalityIndex = np.empty((ncells, 1)) * np.nan
+    for icell in range(ncells):
+        try:
+            SI[icell] = getSpatialinfo(mapXY[icell,:], occmap)
+            SparsityIndex[icell] = getSparsity(mapXY[icell,:], occmap)
+        except:
+            SI[icell] = getSpatialinfo(mapXY[icell,:].T, occmap)
+            SparsityIndex[icell] = getSparsity(mapXY[icell,:].T, occmap)
+        SelectivityIndex[icell] = getSelectivity(mapXY[icell,:])
+        if nYbins == 2:
+            DirectionalityIndex[icell] = getDirectionality(mapXY[icell,0,:], mapXY[icell,1,:])
+
+    # Computing shuffle controls by randomly shifting time bins of positions and
+    # calculate the selectivity metrics for each shuffle control
+    SI_Shf = np.empty((ncells, mapsparams['nShuffle'])) * np.nan
+    SparsityIndex_Shf = np.empty((ncells, mapsparams['nShuffle'])) * np.nan
+    SelectivityIndex_Shf = np.empty((ncells, mapsparams['nShuffle'])) * np.nan
+    DirectionalityIndex_Shf = np.empty((ncells, mapsparams['nShuffle'])) * np.nan
+
+    # Initializing the random number generator for reproducibility purposes
+    nShf = mapsparams['nShuffle']
+
+    # Calculating the place field for each shuffle permutation
+    # Initializing the random number generator for reproducibility purposes
+    rng = np.random.Generator(np.random.MT19937(seed = 0))
+
+    for icell in range(ncells): 
+        for iperm in range(nShf): 
+            # Shifting X and Y by a random amount larger than 1 second
+            tshift = int(rng.integers(ntimepts - 2 * mapsparams['sampleRate']) + 1 * mapsparams['sampleRate'])
+            X_discrete_shf = np.roll(X_discrete, tshift)
+            Y_discrete_shf = np.roll(Y_discrete, tshift)
+
+            # Computing maps after shuffling
+            if sum(Y_discrete_shf) == sum(Y):
+                scmap_shf = ComputeMap(Xd = X_discrete_shf, Yd = None, Z = spikeTrain[icell,:],
+                                    nXbins = nXbins, nYbins = None)
+            elif sum(X_discrete_shf) == sum(X):
+                scmap_shf = ComputeMap(Xd = None, Yd = Y_discrete_shf, Z = spikeTrain[icell,:],
+                                    nXbins = None, nYbins = nYbins)
+            else:
+                scmap_shf = ComputeMap(Xd = X_discrete_shf, Yd = Y_discrete_shf, Z = spikeTrain[icell,:],
+                                    nXbins = nXbins, nYbins = nYbins)
+            try:      
+                scmap_shf[np.isnan(occmap)] = np.nan
+            except:
+                scmap_shf[0][np.isnan(occmap)] = np.nan
+            scmap_shf = GaussianSmooth(scmap_shf, [mapsparams['YsmthNbins']+ smth, mapsparams['XsmthNbins']+ smth])
+            mapX_shf = np.divide(scmap_shf , occmap)
+
+            # saving only the spatial selectivity metrics for each permutation
+            SI_Shf[icell,iperm] = getSpatialinfo(mapX_shf[:], occmap)
+            SparsityIndex_Shf[icell,iperm] = getSparsity(mapX_shf[:], occmap)
+            SelectivityIndex_Shf[icell,iperm] = getSelectivity(mapX_shf[:])
+            if nYbins == 2:
+                DirectionalityIndex_Shf[icell,iperm] = getDirectionality(mapX_shf[:,0], mapX_shf[:,1])
+
+    # Computing p-values from the distribution of selectivity measures obtained from the shuffle controls
+    SI_pval = np.nansum(SI_Shf> SI,1) / mapsparams['nShuffle']
+    SparsityIndex_pval = np.nansum(SparsityIndex_Shf > SparsityIndex, 1) / mapsparams['nShuffle']
+    SelectivityIndex_pval = np.nansum(SelectivityIndex_Shf > SelectivityIndex, 1) / mapsparams['nShuffle']
+    DirectionalityIndex_pval = np.nansum(DirectionalityIndex_Shf > DirectionalityIndex, 1) / mapsparams['nShuffle']
+
+    # Defining a partition of the data for k-fold cross-validation
+    cv = crossvalPartition(ntimepts, mapsparams['kfold'])
+
+    # Computing the spike train predicted from the place field using k-fold  cross-validation
+    mapXY_cv = np.empty((ncells, nYbins, nXbins, mapsparams['kfold'])) * np.nan
+    Ypred = np.empty((ntimepts,ncells)) * np.nan
+
+    for i in range(mapsparams['kfold']):
+        # Subsetting X and spiketrain according to the train set of the current fold
+        Xtraining = X_discrete[cv['trainsets'][i].astype(bool)]
+        Ytraining = Y_discrete[cv['trainsets'][i].astype(bool)]
+        Spktraining = spikeTrain[:,cv['trainsets'][i].astype(bool)]
+
+        # Computing occupancy map for the current fold
+        flat = mapsparams['scalingFactor'] * np.ones(Xtraining.shape)
+        if sum(Ytraining) == sum(Y[cv['trainsets'][i].astype(bool)]):
+            occmap_cv = ComputeMap(Xd = Xtraining, Yd = None, Z = flat,
+                                nXbins = nXbins, nYbins = None)
+        elif sum(Xtraining) == sum(X[cv['trainsets'][i].astype(bool)]):
+            occmap_cv = ComputeMap(Xd = None, Yd = Ytraining, Z = flat,
+                                nXbins = None, nYbins = nYbins)
+        else:
+            occmap_cv = ComputeMap(Xd = Xtraining, Yd = Ytraining, Z = flat,
+                                nXbins = nXbins, nYbins = nYbins)  
+
+        occmap_cv[occmap_cv <= mapsparams['occ_th']] = np.nan
+        occmap_cv = GaussianSmooth(occmap_cv, [mapsparams['YsmthNbins'] + smth, mapsparams['XsmthNbins'] + smth])
+
+        # Computing the spike count map and place field of each cell for the current fold
+        for icell in range(ncells):
+            if sum(Ytraining) == sum(Y[cv['trainsets'][i].astype(bool)]):
+                scmap_cv = ComputeMap(Xd = Xtraining, Yd = None, Z = Spktraining[icell,:],
+                                    nXbins = nXbins, nYbins = None)
+            elif sum(Xtraining) == sum(X[cv['trainsets'][i].astype(bool)]):
+                scmap_cv = ComputeMap(Xd = None, Yd = Ytraining, Z = Spktraining[icell,:],
+                                    nXbins = None, nYbins = nYbins)
+            else:
+                scmap_cv = ComputeMap(Xd = Xtraining, Yd = Ytraining, Z = Spktraining[icell,:],
+                                    nXbins = nXbins, nYbins = nYbins) 
+            try:
+                scmap_cv[np.isnan(occmap)] = np.nan
+            except:
+                scmap_cv[0][np.isnan(occmap)] = np.nan
+            scmap_cv = GaussianSmooth(scmap_cv, [mapsparams['YsmthNbins'] + smth, mapsparams['XsmthNbins'] + smth])
+            try:
+                mapXY_cv[icell,:,:,i] = np.divide(scmap_cv,occmap_cv)
+            except:
+                mapXY_cv[icell,:,:,i] = np.divide(scmap_cv,occmap_cv).T
+
+        # Subsetting X and Y according to the test set of the current fold
+        Xtest = X_discrete[cv['testsets'][i].astype(bool)]
+        Ytest = Y_discrete[cv['testsets'][i].astype(bool)]
+
+        # Computing the spike train predicted on the test set from the place computed from the train set
+        for icell in range(ncells):
+            temp_arr = (icell*np.ones(Xtest.shape).astype(int),
+                        Ytest.astype(int) - 1,
+                        Xtest.astype(int) - 1,
+                        i*np.ones(Xtest.shape).astype(int))
+            temp_idx = (ncells, nYbins, nXbins, mapsparams['kfold'])
+            XYlinidx = np.ravel_multi_index(temp_arr, temp_idx, mode = 'wrap')
+            Ypred[cv['testsets'][i].astype(bool),icell] = mapXY_cv.flatten()[XYlinidx] * mapsparams['scalingFactor']
+
+    # Now computing the spike train predicted from the mean firing rate of the 
+    # cell using the same k-fold partition as above
+    Ypred_cst = np.empty((ntimepts,ncells)) * np.nan
+    for i in range(mapsparams['kfold']):
+        for icell in range(ncells):
+            Ypred_cst[cv['testsets'][i].astype(bool),icell] = np.nanmean(spikeTrain[icell,cv['testsets'][i].astype(bool)])
+
+    # Computing the percentage of explained variance and the log likelihood from the spike trains predicted by the place field model
+    EV = np.empty((ncells,1))*np.nan
+    LLH = np.empty((ncells,1))*np.nan
+
+    for icell in range(ncells):
+        # Percentage of explained variance
+        EV[icell] =  computeEV(spikeTrain[icell,:], Ypred[:,icell])
+
+        # Log likelihood
+        LLH[icell],BIC,AIC = computeLLH_normal(spikeTrain[icell,:], Ypred[:,icell])
+
+    # Same for the spike train predicted by the mean constant model
+
+    EV_cst = np.empty((ncells,1))*np.nan
+    LLH_cst = np.empty((ncells,1))*np.nan
+
+    for icell in range(ncells):
+        # Percentage of explained variance
+        EV_cst[icell] =  computeEV(spikeTrain[icell,:], Ypred_cst[:,icell])
+
+        # Log likelihood
+        LLH_cst[icell],_,_ = computeLLH_normal(spikeTrain[icell,:], Ypred_cst[:,icell])
+
+    # Comparing the place field model to the constant mean model by performing a likelihood ratio test
+    LLH_pval = np.empty((ncells,1)) * np.nan
+    goodidx = LLH > LLH_cst
+    LLH_pval[~goodidx] = 1
+    dof = sum(occmap > 0)-1
+    if sum(goodidx) > 0:
+        _,LLH_pval[goodidx] = lratiotest(LLH[goodidx],LLH_cst[goodidx],dof)
+
+    # Computing a Jacknife estimate of the standard error
+    for i in range(mapXY_cv.shape[3]):
+        mapXY_cv[:,:,:,i] = np.power(mapXY_cv[:,:,:,i] - mapXY,2)
+    mapXY_SE = np.sqrt( (np.divide(mapsparams['kfold'] - 1,mapsparams['kfold'])) * np.sum(mapXY_cv,3) )
+
+    # Populate the output structure with results to be saved
+    mapsparams['tidx'] = tidx
+    Maps = {'mapsparams':mapsparams}
+
+    if nXbins > 1:
+        Maps['Xbincenters'] = mapsparams['Xbinedges'][:-1] + np.diff(mapsparams['Xbinedges']) / 2
+    else:
+        Maps['Xbincenters'] = 1
+
+    if nYbins > 1:
+        Maps['Ybincenters'] = mapsparams['Ybinedges'][:-1] + np.diff(mapsparams['Ybinedges']) / 2
+    else:
+        Maps['Ybincenters'] = 1
+
+    # Interpolating in case there are infinite values among the bin edges
+    # (probably at the beginiing or end in order to clamp de signal
+    if nXbins > 1 and np.sum(~np.isinf(Maps['Xbincenters'])) > 0:
+        xb = np.arange(nXbins)
+        Maps['Xbincenters'] = interpolate.interp1d(xb[~np.isinf(Maps['Xbincenters'])], 
+                                                Maps['Xbincenters'][~np.isinf(Maps['Xbincenters'])], 
+                                                kind = 'linear', fill_value="extrapolate")(xb)
+
+    if nYbins > 1 and np.sum(~np.isinf(Maps['Ybincenters'])) > 0:
+        yb = np.arange(nYbins)
+        Maps['Xbincenters'] = interpolate.interp1d(yb[~np.isinf(Maps['Ybincenters'])], 
+                                                Maps['Ybincenters'][~np.isinf(Maps['Ybincenters'])], 
+                                                kind = 'linear', fill_value="extrapolate")(yb)
+
+    Maps['map'] = mapXY
+    Maps['map_cv'] = mapXY_cv
+    Maps['map_SE'] = mapXY_SE
+    Maps['occmap'] = occmap
+    Maps['SI'] = SI
+    Maps['SparsityIndex'] = SparsityIndex
+    Maps['SelectivityIndex '] = SelectivityIndex
+    Maps['DirectionalityIndex'] = DirectionalityIndex
+    Maps['SI_pval']= SI_pval
+    Maps['SparsityIndex_pval']= SparsityIndex_pval
+    Maps['SelectivityIndex_pval'] = SelectivityIndex_pval
+    Maps['DirectionalityIndex_pval'] = DirectionalityIndex_pval
+    Maps['EV'] = EV
+    Maps['EV_cst'] = EV_cst
+    Maps['LLH'] = LLH
+    Maps['LLH_cst'] = LLH_cst
+    Maps['LLH_pval'] = LLH_pval
+
+    return Maps
