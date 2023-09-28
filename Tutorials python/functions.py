@@ -1111,7 +1111,13 @@ def MapsAnalysis(Nav, Spk, mapsparams):
     "Advanced computational analysis for behavioral and neurophysiological recordings"
     Adapted by Tulio Almeida
     """
-    smth = 1
+    import os
+    import scipy.io
+    import numpy as np
+    import pandas as pd
+    from scipy import signal,stats,sparse,interpolate
+
+    smth = 1 # smooth correction ?
 
     # If no Y variable are indicated in mapsparams, we'll just compute a 1D map
     if len(mapsparams['Xvariablename']) != 0:
