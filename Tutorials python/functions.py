@@ -1536,6 +1536,7 @@ def SetGLMsParams(Nav,Spk):
     Written by J. Fournier in 08/2023 for the Summer school
     "Advanced computational analysis for behavioral and neurophysiological recordings"
     Adapted by Tulio Almeida"""
+    import numpy as np
 
     # Conditions over the fields of Nav for which place fields will be estimated
     # glmsparams.subset should be a structure where fields have names of the 
@@ -1601,3 +1602,53 @@ def SetGLMsParams(Nav,Spk):
     glmsparams['pval_th'] = .05
 
     return glmsparams
+
+def computeLLH_poisson(y, ypred, k = None):
+    """computeLLH_poisson Compute log likelihood, Bayesian Information Criterion (BIC),
+    and Akaike Information Criterion (AIC) for a Poisson model.
+    
+    [LLH, BIC, AIC] = computeLLH_poisson(y, ypred, k) computes the log likelihood (LLH)
+    for a Poisson model given the original signal (y) and its model prediction (ypred).
+    The total number of model parameters (k) is optionally provided for calculating BIC and AIC.
+    
+    INPUTS:
+    - y: Original signal.
+    - ypred: Model prediction.
+    - k: Total number of model parameters (optional for BIC and AIC).
+    
+    OUTPUTS:
+    - LLH: Log likelihood of the Poisson model.
+    - BIC: Bayesian Information Criterion.
+    - AIC: Akaike Information Criterion.
+    
+    USAGE:
+    [LLH, BIC, AIC] = computeLLH_poisson(y, ypred, k);
+    
+    See also: poisspdf
+    
+    Written by J. Fournier in 08/2023 for the Summer school
+    "Advanced computational analysis for behavioral and neurophysiological recordings"
+    Adapted by Tulio Almeida"""
+    from scipy import stats
+    import numpy as np
+    # Compute the log likelihood for a Poisson model. y is the original signal;
+    # ypred, the model prediction and k is the total number of model parameters.
+    # k is only necessary if the Bayesian Information Criterion and Akaike
+    # Information Criterion are required.
+
+    # probability density function for a normal distribution with std = s.
+    pd = stats.poisson.pmf(y, ypred)
+    pd[pd == 0] = 1e-16
+
+    LLH = np.nansum(np.log(pd))
+
+    # if k is provided, we also compute BIC and AIC of the model.
+    if k is None:
+        BIC = np.nan
+        AIC = np.nan
+    elif k > 2:
+        N = len(y)
+        BIC = k * np.log(N) - 2 * LLH
+        AIC = 2 * k - 2 * LLH
+
+    return LLH, BIC, AIC
